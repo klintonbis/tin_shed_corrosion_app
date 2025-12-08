@@ -1,9 +1,11 @@
 # app.py
 
+import os
+import time
 import json
 from pathlib import Path
 
-import gdown
+import requests
 import streamlit as st
 import torch
 from PIL import Image
@@ -13,11 +15,7 @@ import numpy as np
 import cv2
 import pandas as pd
 import plotly.express as px
-import time
-import os
-import json
-from pathlib import Path
-
+import plotly.graph_objects as go
 
 
 # ====================== CONFIG ======================
@@ -26,42 +24,57 @@ MODEL_DIR = Path("models")
 MODEL_PATH = MODEL_DIR / "tin_shed_resnet18.pth"
 CLASS_IDX_PATH = Path("class_indices.json")
 
-# 🔴 REPLACE WITH YOUR REAL GOOGLE DRIVE FILE ID
-import streamlit as st  # already imported at top
-
-# Read from Streamlit secrets when deployed; fallback for local testing
-# Google Drive model file ID
-
-DRIVE_URL = "https://drive.google.com/file/d/1Z7kWqg6hcXfT7oRe0X9r83NXy_1rB4Z6/view?usp=sharing"
-  # <-- your real ID
-
-
-
+# 🔹 Main model is hosted on Dropbox (DIRECT DOWNLOAD LINK)
+# Make sure the link ends with `dl=1` so it's a direct download
+DROPBOX_DIRECT_URL = (
+    "https://www.dropbox.com/scl/fi/gyx49dw2rpedwkr878b2f/"
+    "tin_shed_resnet18.pth?rlkey=x8fpr3sba36k1vdvrk8176ubt&st=2jq5xtud&dl=1"
+)
 
 # For Streamlit Cloud it's safer to use CPU
 DEVICE = "cpu"
 
-THRESHOLD = 0.80  # 80% confidence required
+# Minimum confidence required to treat prediction as reliable
+THRESHOLD = 0.80  # 80%
 
 
 # ================== MODEL DOWNLOAD ==================
 
-def download_model():
-    """Force download model file from Google Drive."""
-    MODEL_DIR.mkdir(exist_ok=True)
-    if MODEL_PATH.exists():
-        MODEL_PATH.unlink()  # remove any corrupted version
+def download_model_from_dropbox():
+    """Download the model file from Dropbox into MODEL_PATH."""
+    MODEL_DIR.mkdir(exist_ok=True, parents=True)
 
-    st.info("📥 Downloading model from Google Drive (this may take a moment)...")
-    gdown.download(DRIVE_URL, str(MODEL_PATH), quiet=False, fuzzy=True)
+    if MODEL_PATH.exists():
+        # Remove any old/corrupted copy
+        MODEL_PATH.unlink()
+
+    st.info("📥 Downloading model from Dropbox...")
+
+    try:
+        with requests.get(DROPBOX_DIRECT_URL, stream=True) as r:
+            r.raise_for_status()
+            with open(MODEL_PATH, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+    except Exception as e:
+        st.error(f"❌ Failed to download model from Dropbox: {e}")
+        raise
+
+    if not MODEL_PATH.exists():
+        raise RuntimeError("Download finished but model file not found.")
+
     size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
-    st.write(f"✅ Model downloaded. Size: {size_mb:.2f} MB")
+    st.success(f"✅ Model downloaded successfully. Size: {size_mb:.2f} MB")
 
 
 def ensure_model_file():
-    """Ensure model file exists and is loadable, otherwise re-download."""
+    """
+    Ensure model file exists and is loadable.
+    If missing or corrupted, (re)download from Dropbox.
+    """
     if not MODEL_PATH.exists():
-        download_model()
+        download_model_from_dropbox()
         return
 
     # Try loading once; if it fails, re-download
@@ -69,21 +82,19 @@ def ensure_model_file():
         _ = torch.load(MODEL_PATH, map_location="cpu")
     except Exception as e:
         st.warning(f"Model file seems corrupted, re-downloading. Error: {e}")
-        download_model()
-
+        download_model_from_dropbox()
 
 
 # ================== UTIL FUNCTIONS ==================
 
 @st.cache_resource
 def load_class_indices():
-    """Load mapping {0: 'damaged', 1: 'semi_damaged', ...}."""
+    """Load mapping {0: 'damaged', 1: 'semi_damaged', ...} from JSON file."""
     with CLASS_IDX_PATH.open("r") as f:
         mapping = json.load(f)
     return {int(k): v for k, v in mapping.items()}
 
 
-@st.cache_resource
 @st.cache_resource
 def load_model():
     """Ensure model is present, then load ResNet18 with trained weights."""
@@ -103,7 +114,6 @@ def load_model():
     return model, class_indices
 
 
-
 def get_transform():
     return transforms.Compose([
         transforms.Resize((224, 224)),
@@ -116,7 +126,7 @@ def get_transform():
 
 
 def preprocess_image(image: Image.Image):
-    """Preprocess PIL image → model tensor."""
+    """Preprocess PIL image → model tensor on DEVICE."""
     transform = get_transform()
     tensor = transform(image).unsqueeze(0)
     return tensor.to(DEVICE)
@@ -178,7 +188,6 @@ def build_cam_visuals(original_pil: Image.Image, cam: np.ndarray, alpha=0.5):
     Create:
       - heatmap only (color)
       - overlay (heatmap + original)
-    Use smoother colormap and light blur for nicer visualization.
     """
     img = np.array(original_pil)  # HxWx3, RGB
 
@@ -189,7 +198,10 @@ def build_cam_visuals(original_pil: Image.Image, cam: np.ndarray, alpha=0.5):
     cam_blurred = cv2.GaussianBlur(cam_resized, (9, 9), 0)
 
     # Use modern colormap (TURBO)
-    heatmap = cv2.applyColorMap((cam_blurred * 255).astype(np.uint8), cv2.COLORMAP_TURBO)
+    heatmap = cv2.applyColorMap(
+        (cam_blurred * 255).astype(np.uint8),
+        cv2.COLORMAP_TURBO
+    )
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
     overlay = (alpha * heatmap + (1 - alpha) * img).astype(np.uint8)
@@ -265,7 +277,6 @@ def get_recommendation(label: str, is_confident: bool) -> str:
     return "Prediction received, but no recommendation rule matches this class."
 
 
-
 # ====================== STREAMLIT APP ======================
 
 def main():
@@ -322,15 +333,13 @@ def main():
                 )
 
             # Decide whether to show Grad-CAM when uncertain
-            show_heatmap = False
-
             if is_confident:
-                show_heatmap = True
                 st.success(
                     f"Prediction: **{label}** ✅\n\n"
                     f"Confidence: **{confidence * 100:.2f}%** "
                     f"(above {THRESHOLD*100:.0f}% threshold)"
                 )
+                show_heatmap = True
             else:
                 st.warning(
                     f"Prediction is **UNCERTAIN**.\n\n"
@@ -343,30 +352,22 @@ def main():
                     value=False,
                 )
 
-            # 🔹 Recommendation section (always shown)
-                        # 🔹 Recommendation section (always shown, color-coded with icons)
+            # 🔹 Recommendation section (always shown, color-coded with icons)
             recommendation = get_recommendation(label, is_confident)
             label_lower = label.lower().strip()
 
             st.subheader("Recommended action")
-
             if not is_confident:
-                # Uncertain prediction → yellow warning card
                 st.warning(f"⚠️ {recommendation}")
             else:
                 if label_lower == "damaged":
-                    # High corrosion → red card
                     st.error(f"❗ {recommendation}")
                 elif label_lower == "semi_damaged":
-                    # Moderate corrosion → yellow card
                     st.warning(f"⚠️ {recommendation}")
                 elif label_lower == "non_damaged":
-                    # Healthy roof → green card
                     st.success(f"✔️ {recommendation}")
                 else:
-                    # Fallback → neutral info card
                     st.info(f"ℹ️ {recommendation}")
-
 
             # 🔹 Show heatmap visuals if enabled
             if show_heatmap:
@@ -392,16 +393,8 @@ def main():
                     "Blue regions have low influence."
                 )
 
-            # Probabilities (always in an expander)
-                        # ================== CLASS PROBABILITIES WITH CHARTS ==================
-                        # ================== CLASS PROBABILITIES WITH CHARTS ==================
+            # ================== CLASS PROBABILITIES WITH CHARTS ==================
             with st.expander("Class probabilities & details", expanded=True):
-
-                import pandas as pd
-                import plotly.express as px
-                import plotly.graph_objects as go
-                import time
-
                 st.subheader("Class probabilities")
 
                 # ---- Controls for visualization style ----
@@ -431,7 +424,6 @@ def main():
                     "Probability": prob_values,
                 })
 
-                # Custom color palette
                 palette = px.colors.qualitative.Set2
 
                 # ---- Side-by-side layout: bar chart | pie chart ----
@@ -531,9 +523,9 @@ def main():
                 st.plotly_chart(fig_gauge, use_container_width=True)
 
                 st.caption(
-                    "Probabilities come from a softmax over the model outputs and sum to 100% across classes."
+                    "Probabilities come from a softmax over the model outputs "
+                    "and sum to 100% across classes."
                 )
-
 
 
 if __name__ == "__main__":
