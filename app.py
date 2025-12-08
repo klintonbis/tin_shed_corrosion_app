@@ -1,4 +1,4 @@
-﻿# app.py
+# app.py
 
 import json
 from pathlib import Path
@@ -23,9 +23,20 @@ MODEL_PATH = MODEL_DIR / "tin_shed_resnet18.pth"
 CLASS_IDX_PATH = Path("class_indices.json")
 
 # 🔴 REPLACE WITH YOUR REAL GOOGLE DRIVE FILE ID
-DRIVE_FILE_ID = "PUT_YOUR_DRIVE_FILE_ID_HERE"
+import streamlit as st  # already imported at top
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Read from Streamlit secrets when deployed; fallback for local testing
+# Google Drive model file ID
+
+DRIVE_URL = "https://drive.google.com/file/d/1Z7kWqg6hcXfT7oRe0X9r83NXy_1rB4Z6/view?usp=sharing"
+  # <-- your real ID
+
+
+
+
+# For Streamlit Cloud it's safer to use CPU
+DEVICE = "cpu"
+
 THRESHOLD = 0.80  # 80% confidence required
 
 
@@ -39,8 +50,17 @@ def download_model_if_needed():
         return
 
     st.info("📥 Downloading model from Google Drive (first time only)...")
-    url = f"https://drive.google.com/uc?id=" + DRIVE_FILE_ID
-    gdown.download(url, str(MODEL_PATH), quiet=False)
+
+    try:
+        gdown.download(DRIVE_URL, str(MODEL_PATH), quiet=False, fuzzy=True)
+    except Exception as e:
+        st.error(
+            "Model download failed. Please check that:\n"
+            "1) The Google Drive file is shared as 'Anyone with the link - Viewer'\n"
+            "2) DRIVE_URL in app.py is the correct sharing link for the FILE\n\n"
+            f"Error details: {e}"
+        )
+        raise
 
 
 # ================== UTIL FUNCTIONS ==================
