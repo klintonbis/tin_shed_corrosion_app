@@ -14,6 +14,10 @@ import cv2
 import pandas as pd
 import plotly.express as px
 import time
+import os
+import json
+from pathlib import Path
+
 
 
 # ====================== CONFIG ======================
@@ -42,25 +46,31 @@ THRESHOLD = 0.80  # 80% confidence required
 
 # ================== MODEL DOWNLOAD ==================
 
-def download_model_if_needed():
-    """Download the model from Google Drive if it doesn't exist locally."""
+def download_model():
+    """Force download model file from Google Drive."""
     MODEL_DIR.mkdir(exist_ok=True)
-
     if MODEL_PATH.exists():
+        MODEL_PATH.unlink()  # remove any corrupted version
+
+    st.info("📥 Downloading model from Google Drive (this may take a moment)...")
+    gdown.download(DRIVE_URL, str(MODEL_PATH), quiet=False, fuzzy=True)
+    size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
+    st.write(f"✅ Model downloaded. Size: {size_mb:.2f} MB")
+
+
+def ensure_model_file():
+    """Ensure model file exists and is loadable, otherwise re-download."""
+    if not MODEL_PATH.exists():
+        download_model()
         return
 
-    st.info("📥 Downloading model from Google Drive (first time only)...")
-
+    # Try loading once; if it fails, re-download
     try:
-        gdown.download(DRIVE_URL, str(MODEL_PATH), quiet=False, fuzzy=True)
+        _ = torch.load(MODEL_PATH, map_location="cpu")
     except Exception as e:
-        st.error(
-            "Model download failed. Please check that:\n"
-            "1) The Google Drive file is shared as 'Anyone with the link - Viewer'\n"
-            "2) DRIVE_URL in app.py is the correct sharing link for the FILE\n\n"
-            f"Error details: {e}"
-        )
-        raise
+        st.warning(f"Model file seems corrupted, re-downloading. Error: {e}")
+        download_model()
+
 
 
 # ================== UTIL FUNCTIONS ==================
@@ -74,9 +84,10 @@ def load_class_indices():
 
 
 @st.cache_resource
+@st.cache_resource
 def load_model():
-    """Download (if needed) and load the ResNet18 model with trained weights."""
-    download_model_if_needed()
+    """Ensure model is present, then load ResNet18 with trained weights."""
+    ensure_model_file()
 
     class_indices = load_class_indices()
     num_classes = len(class_indices)
@@ -90,6 +101,7 @@ def load_model():
     model.to(DEVICE)
     model.eval()
     return model, class_indices
+
 
 
 def get_transform():
