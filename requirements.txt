@@ -1,10 +1,9 @@
-torch
-torchvision
 streamlit
 gdown
-Pillow
+torch
+torchvision
 numpy
-matplotlib
-scikit-learn
-opencv-python
+pillow
+opencv-python-headless
+pandas
 plotly
