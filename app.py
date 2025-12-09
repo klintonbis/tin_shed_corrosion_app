@@ -35,7 +35,7 @@ DROPBOX_DIRECT_URL = (
 DEVICE = "cpu"
 
 # Minimum confidence required to treat prediction as reliable
-THRESHOLD = 0.80  # 80%
+THRESHOLD = 0.94  # 80%
 
 
 # ================== MODEL DOWNLOAD ==================
@@ -530,3 +530,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
