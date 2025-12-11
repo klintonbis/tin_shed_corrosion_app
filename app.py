@@ -290,7 +290,7 @@ def main():
     st.write(
         "Upload an image of a tin shed. "
         "The model classifies it as **damaged**, **semi_damaged**, or **non_damaged** and shows a "
-        "Grad-CAM heatmap highlighting the regions that most influenced the decision.\n\n"
+        "Saliency heatmap highlighting the regions that most influenced the decision.\n\n"
         f"If the highest confidence is below **{THRESHOLD*100:.0f}%**, "
         "the prediction is marked as **uncertain** to avoid illogical results on unrelated images."
     )
@@ -530,4 +530,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
